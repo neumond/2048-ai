@@ -1,48 +1,12 @@
 import random
 from math import log
-
-
-
-def color(text, col, bold=True):
-    'Wraps a text with terminal color codes'
-    bl = ';1' if bold else ''
-    return '\x1B[' + col + bl + 'm' + str(text) + '\x1B[39;0m'
-
-color._RED     = '31'
-color._GREEN   = '32'
-color._YELLOW  = '33'
-color._BLUE    = '34'
-color._MAGENTA = '35'
-color._CYAN    = '36'
-color._WHITE   = '37'
-
-color.RED     = '91'
-color.GREEN   = '92'
-color.YELLOW  = '93'
-color.BLUE    = '94'
-color.MAGENTA = '95'
-color.CYAN    = '96'
-color.WHITE   = '97'
-
-
-nummap = {
-  2: (color._WHITE, False),
-  4: (color.WHITE, False),
-  8: (color._YELLOW, False),
-  16: (color.YELLOW, False),
-  32: (color._CYAN, False),
-  64: (color.CYAN, False),
-  128: (color._GREEN, False),
-  256: (color.GREEN, False),
-  512: (color.GREEN, True),
-  1024: (color.RED, True),
-  2048: (color.MAGENTA, True),
-}
-
-
+from os.path import getmtime
+from numprint import print_state
 
 
 size = 4
+KOEF = 0.4
+
 
 def get_val(s, x, y):
     return s[x + y*size]
@@ -52,13 +16,13 @@ def set_val(s, x, y, val):
     s[x + y*size] = val
 
 
-def print_state(s):
-    for y in range(size):
-        for x in range(size):
-            v = get_val(s, x, y)
-            print('|{}'.format(color('{:4d}'.format(v), *nummap.get(v, (color._WHITE, False)))) if v else '|    ', end='')
-        print('|')
-    print()
+def foldweight(n):
+    return log(n, 1.5)
+
+
+def failcoeff(jumpover, ecells):
+    return (jumpover / ecells) if jumpover > 0 else 0
+
 
 # dir: 0 - up, 1 - right, 2 - down, 3 - left
 
@@ -68,15 +32,18 @@ def move(s, direct):
 
     r2args = (size - 1, -1, -1) if backward else (0, size, 1)
     movements = 0
-    folds, foldsum = 0, 0
+    ecells = emptycells(s)
+    folds, foldsum, failpoints = 0, 0, 0
     for c1 in range(size):
         point = size - 1 if backward else 0
         last = None
+        jumps = 0
         for c2 in range(*r2args):
             x, y = (c1, c2) if vert else (c2, c1)
 
             v = get_val(s, x, y)
             if v == 0:
+                jumps += 1
                 continue
 
             set_val(s, x, y, 0)
@@ -85,12 +52,14 @@ def move(s, direct):
                 point -= -1 if backward else 1
                 v += last
                 folds += 1
-                #foldsum += int(log(v, 2))
-                foldsum += log(v, 1.5)
-                #foldsum += v
+                xval = foldweight(v)
+                foldsum += xval
+                failpoints = xval * failcoeff(jumps, ecells)
                 last = None
             else:
                 last = v
+
+            jumps = 0
 
             if vert:
                 set_val(s, x, point, v)
@@ -101,7 +70,7 @@ def move(s, direct):
                 movements += 1
 
             point += -1 if backward else 1
-    return movements, folds, foldsum
+    return movements, folds, foldsum, failpoints
 
 
 def pathcells(s, direct):
@@ -144,60 +113,70 @@ def put_random(s):
     raise Exception('Random cell not found')
 
 
-s = [0] * size * size
-for i in range(3):
-    put_random(s)
-print_state(s)
-
-dnames = ['↑', '→', '↓', '←']
-
-
 def move_tree(state, backtrack):
+    if backtrack <= 0:
+        return 0
     maxfldsum = 0
     ecells = emptycells(state)
     for direct in range(4):
         s = state.copy()
-        mvs, flds, fldsum = move(s, direct)
-        pc = pathcells(state, direct)
-        if pc > ecells:
-            raise Exception('Pathcells > Emptycells: {} > {}'.format(pc, ecells))
-        if mvs > 0:
-            if backtrack > 0:
-                fldsum += move_tree(s, backtrack - 1)
-            if pc > 0:
-                fldsum *= (1 - pc / ecells)
-            maxfldsum = max(maxfldsum, fldsum)
+        mvs, flds, fldsum, failsum = move(s, direct)
+        if mvs <= 0:
+            continue
+        fldsum -= failsum
+        fldsum += move_tree(s, backtrack - 1) * KOEF
+        maxfldsum = max(maxfldsum, fldsum)
     return maxfldsum
 
 
-def choose_move(state):
+def choose_move(state, backtrack):
     bestmove, bestmove_dir = None, None
     for direct in range(4):
         s = state.copy()
-        mvs, flds, fldsum = move(s, direct)
-        fldsum += move_tree(s, 6)
+        mvs, flds, fldsum, failsum = move(s, direct)
+        fldsum += move_tree(s, backtrack)
         if mvs > 0 and (bestmove is None or fldsum > bestmove):
             bestmove, bestmove_dir = fldsum, direct
     #print('bestmove={}'.format(bestmove))
     return bestmove_dir
 
 
-counter = 0
-while True:
-    bestmove_dir = choose_move(s)
-    rnd = False
-    if bestmove_dir is not None:
-        mvs, flds, fldsum = move(s, bestmove_dir)
-        rnd = put_random(s)
-    if bestmove_dir is None or not rnd:
-        break
-    counter += 1
-    print('{}. Moving {}, {} movements'.format(counter, dnames[bestmove_dir], mvs))
-    print_state(s)
+def main():
+    vers = getmtime('game.py')
+
+    s = [0] * size * size
+    for i in range(3):
+        put_random(s)
+    print_state(size, s)
+
+    dnames = ['↑', '→', '↓', '←']
+
+    counter = 0
+    while True:
+        backtrack = 0
+        if max(s) >= 512:
+            backtrack += 1
+        if max(s) >= 1024:
+            backtrack += 1
+        backtrack = 3
+        bestmove_dir = choose_move(s, backtrack)
+        rnd = False
+        if bestmove_dir is not None:
+            mvs, flds, fldsum, failsum = move(s, bestmove_dir)
+            rnd = put_random(s)
+        if bestmove_dir is None or not rnd:
+            break
+        counter += 1
+        print('{}. Moving {}, {} movements'.format(counter, dnames[bestmove_dir], mvs))
+        print_state(size, s)
 
 
-print('GAME OVER')
-print('Maximum is {}'.format(max(s)))
+    print('GAME OVER')
+    print('Maximum is {}'.format(max(s)))
 
-with open('top.txt', 'a') as f:
-    f.write('{}\n'.format(max(s)))
+    with open('top.txt', 'a') as f:
+        f.write('{}: {}\n'.format(vers, max(s)))
+
+
+if __name__ == '__main__':
+    main()
