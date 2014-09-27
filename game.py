@@ -72,69 +72,185 @@ def move(s, direct):
             point += -1 if backward else 1
     return movements, folds, foldsum, failpoints
 
+
+def flow_line(row):
+    for i, v in enumerate(row):
+        if v == 0:
+            continue
+        for cur_idx in range(i - 1, -1, -1):
+            cur = row[cur_idx]
+            if cur == 0: # move
+                row[cur_idx] = row[cur_idx + 1]
+                row[cur_idx + 1] = 0
+
+
+def flow_prob_line(row):
+    row2 = [{(k, i) if k != 0 else 0: v for k, v in v.items()} for i, v in enumerate(row)]
+    for i, v in enumerate(row2):
+        v = v.copy()
+        #print('base: #{} {}'.format(i, v))
+        pass_prob = 1.
+        for cur_idx in range(i - 1, -1, -1):
+            cur = row2[cur_idx]
+            prev = row2[cur_idx + 1]
+            pass_prob *= cur.get(0, 0.)
+            #print('sub (pass={}): #{} {}'.format(pass_prob, cur_idx, cur))
+            if pass_prob == 0.:
+                break
+            flowsum = 0.
+            for number, prob in v.items():
+                if number == 0 or prob == 0.:
+                    continue
+                flow = prob * pass_prob
+                #print('  numflow (n={}, flow={})'.format(number, flow))
+                if flow != 0.:
+                    cur[number] = cur.get(number, 0.) + flow
+                    prev[number] = prev.get(number, 0.) - flow
+                    flowsum += flow
+            if flowsum != 0.:
+                cur[0] = cur.get(0, 0.) - flowsum
+                prev[0] = prev.get(0, 0.) + flowsum
+    row.clear()
+    for v in row2:
+        row.append(v)
+
+
+def merge_line(row):
+    for cur_idx in range(len(row) - 1):
+        nxt_idx = cur_idx + 1
+        cur, nxt = row[cur_idx], row[nxt_idx]
+        if cur == nxt:
+            row[cur_idx] = cur * 2
+            for shift_idx in range(nxt_idx + 1, len(row)):
+                row[shift_idx - 1] = row[shift_idx]
+            row[-1] = 0
+
+
+def merge_prob_line(row):
+    for cur_idx in range(len(row) - 1):
+        nxt_idx = cur_idx + 1
+        cur, nxt = row[cur_idx], row[nxt_idx]
+        #print('Base #{} {}'.format(cur_idx, cur))
+        #print('         {}'.format(nxt))
+        total_shift_prob = 0.
+        for number, cur_prob in cur.copy().items():
+            if number == 0:
+                continue
+            n2 = number[0] * 2
+            affected_nxt_items = list(filter(lambda x: x[0][0] == number[0] and x[0][1] > number[1], filter(lambda x: x[0] != 0, nxt.items())))
+            #print('  affected={}'.format(affected_nxt_items))
+            nxt_prob = sum(map(lambda x: x[1], affected_nxt_items))
+            #print('nxt_prob={}'.format(nxt_prob))
+            if cur_prob == 0. or nxt_prob == 0.:
+                continue
+            merge_prob = min(cur_prob, nxt_prob)
+            #print('  num={}, merge={}'.format(number[0], merge_prob))
+            total_shift_prob += merge_prob
+            cur[number] = cur_prob - merge_prob
+            cur[n2] = cur.get(n2, 0.) + merge_prob
+            for k, v in affected_nxt_items:
+                #nxt[k] *= 1 - cur_prob
+                nxt[k] = nxt[k] - merge_prob * (nxt[k] / nxt_prob)
+            #nxt[number] = nxt_prob - merge_prob
+            nxt[0] = nxt.get(0, 0.) + merge_prob
+        if total_shift_prob != 0.:
+            #print('Shift at #{} with k={}'.format(nxt_idx, total_shift_prob))
+            #print('  before shift {}'.format(row))
+            for shift_idx in range(nxt_idx + 1, len(row)):
+                # a = b * prob + a * (1 - prob)
+                a, b = row[shift_idx - 1], row[shift_idx]
+                a = {k: v * (1 - total_shift_prob) for k, v in a.items()}
+                for k, v in b.items():
+                    a[k] = a.get(k, 0.) + v * total_shift_prob
+            row[-1] = {k: v * (1 - total_shift_prob) for k, v in a.items()}
+            row[-1][0] = row[-1].get(0, 0.) + total_shift_prob
+            #print('  after shift {}'.format(row))
+    # flatten dicts
+    for cur in row:
+        for k, v in cur.copy().items():
+            if not isinstance(k, tuple):
+                continue
+            number = k[0]
+            cur[number] = cur.get(number, 0.) + v
+            del cur[k]
+
+
+def check_and_clean_row(row):
+    for cur in row:
+        s = sum(cur.values())
+        if abs(s - 1.) > 0.001:
+            raise Exception('Invalid prob sum {} for {}'.format(s, cur))
+        for k, v in list(cur.items()):
+            if not (0. <= v <= 1.):
+                raise Exception('Invalid value {} for key {} in {}'.format(v, k, cur))
+            if v == 0.:
+                del cur[k]
+
+
 # dir: 0 - up, 1 - right, 2 - down, 3 - left
 
-def probmove(s, direct):
-    backward = direct == 1 or direct == 2
-    vert = direct == 0 or direct == 2
+#def probmove(s, direct):
+    #backward = direct == 1 or direct == 2
+    #vert = direct == 0 or direct == 2
 
-    r2args = (size - 1, -1, -1) if backward else (0, size, 1)
-    def r2args_sub(coord):
-        return (coord + 1, size, 1) if backward else (coord - 1, -1, -1)
+    #r2step = -1 if backward else 1
+    #r2args = (size - 1, -1, -1) if backward else (0, size, 1)
+    #r2args_1 = (size - 1, 0, -1) if backward else (0, size - 1, 1)
+    #def r2args_sub(coord):
+        #return (coord + 1, size, 1) if backward else (coord - 1, -1, -1)
 
-    # store here merged probabilities to exclude cumulative effects
-    # i.e. merge can be done once per move
-    pending_merges = []
+    ## store here merged probabilities to exclude cumulative effects
+    ## i.e. merge can be done once per move
+    #pending_merges = []
 
-    print('Matrix: {}'.format(s))
-    for c1 in range(size):
-        for c2 in range(*r2args):
-            x, y = (c1, c2) if vert else (c2, c1)
+    ## merge step
+    #for c1 in range(size):
+        #for c2 in range(*r2args_1):
+            #x, y = (c1, c2) if vert else (c2, c1)
+            #xc, yc = (c1, c2 + r2step) if vert else (c2 + r2step, c1)
+            #v = get_val(s, x, y)
+            #vnext = get_val(s, xc, yc)
+            #total_shift_prob = 0.
+            #for number, prob in v.items():
+                #if number == 0 or number not in vnext:
+                    #continue
+                #merge_prob = prob * vnext[number]
+                #if merge_prob == 0.:
+                    #continue
+                #total_shift_prob += merge_prob
+                ## TODO: merge
 
-            v = get_val(s, x, y)
-            for number, prob in v.items():
-                if number == 0:
-                    continue
-                amount = prob
-                prev = v
-                print('enum for ({}, {}), #{}: '.format(x, y, number), end='')
-                for c22 in range(*r2args_sub(c2)):
-                    xc, yc = (c1, c22) if vert else (c22, c1)
-                    print('({}, {}) '.format(xc, yc), end='')
-                    vv = get_val(s, xc, yc)
+            #if total_shift_prob != 0.:
+                #for c22 in range(*r2args_sub_1(c2)):
 
-                    assert 0. <= vv.get(number, 0.) <= 1.
-                    assert 0. <= vv.get(0, 0.) <= 1.
-                    assert 0. <= (vv.get(number, 0.) + vv.get(0, 0.)) <= 1.
-                    merge_prob = amount * vv.get(number, 0.)
-                    flow = amount * vv.get(0, 0.)
+                #prev = v
+                ##print('enum for ({}, {}), #{}: '.format(x, y, number), end='')
+                #for c22 in range(*r2args_sub(c2)):
+                    #xc, yc = (c1, c22) if vert else (c22, c1)
+                    ##print('({}, {}) '.format(xc, yc), end='')
+                    #vv = get_val(s, xc, yc)
 
-                    if merge_prob != 0.:
-                        pending_merges.append((xc, yc, number * 2, merge_prob))
-                        vv[number] = vv.get(number, 0.) - merge_prob  # reserving space for merged cell
-                        prev[number] = prev.get(number, 0.) - merge_prob
-                        prev[0] = prev.get(0, 0.) + merge_prob
+                    #flow = amount * vv.get(0, 0.)
+                    #if flow != 0.:
+                        #vv[number] = vv.get(number, 0.) + flow
+                        #vv[0] = vv.get(0, 0.) - flow
+                        #prev[number] = prev.get(number, 0.) - flow
+                        #prev[0] = prev.get(0, 0.) + flow
 
-                    if flow != 0.:
-                        vv[number] = vv.get(number, 0.) + flow
-                        vv[0] = vv.get(0, 0.) - flow
-                        prev[number] = prev.get(number, 0.) - flow
-                        prev[0] = prev.get(0, 0.) + flow
+                    #amount = flow
+                    #prev = vv
+                ##print()
 
-                    amount = flow
-                    prev = vv
-                print()
+    #for x, y, number, prob in pending_merges:
+        #v = get_val(s, x, y)
+        #v[number] = v.get(number, 0.) + prob
 
-    for x, y, number, prob in pending_merges:
-        v = get_val(s, x, y)
-        v[number] = v.get(number, 0.) + prob
-
-    for v in s:
-        if abs(sum(list(v.values())) - 1.0) > 0.001:
-            raise Exception('Sum of probabilities is not 1 ({}): {}'.format(sum(list(v.values())), v))
-        for k in list(v.keys()):
-            if v[k] <= 0.:
-                del v[k]
+    #for v in s:
+        #if abs(sum(list(v.values())) - 1.0) > 0.001:
+            #raise Exception('Sum of probabilities is not 1 ({}): {}'.format(sum(list(v.values())), v))
+        #for k in list(v.keys()):
+            #if v[k] <= 0.:
+                #del v[k]
 
 
 def probtest(row):
