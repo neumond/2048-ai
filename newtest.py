@@ -47,6 +47,7 @@ class LineTest(unittest.TestCase):
 
 
 class FlowProbLineTest(unittest.TestCase):
+    maxDiff = None
     def check(self, a, b):
         flow_prob_line(a)
         check_and_clean_row(a)
@@ -104,8 +105,36 @@ class FlowProbLineTest(unittest.TestCase):
           {0: 1.},
         ])
 
+    def test_7(self):
+        self.check([
+          {0: 1.},
+          {0: .5, 4: .5},
+          {0: .5, 4: .5},
+          {0: .5, 4: .5},
+        ], [
+          {0: .125, (4, 1): .5, (4, 2): .25, (4, 3): .125},
+          {0: .5, (4, 2): .25, (4, 3): .25},
+          {0: .875, (4, 3): .125},
+          {0: 1.},
+        ])
+
+    def test_8(self):
+        x = 1/16
+        self.check([
+          {0: .5, 4: .5},
+          {0: .5, 4: .5},
+          {0: .5, 4: .5},
+          {0: .5, 4: .5},
+        ], [
+          {0: 1*x, (4, 0): 8*x, (4, 1): 4*x, (4, 2): 2*x, (4, 3): x},
+          {0: 5*x, (4, 1): 4*x, (4, 2): 4*x, (4, 3): 3*x},
+          {0: 11*x, (4, 2): 2*x, (4, 3): 3*x},
+          {0: 15*x, (4, 3): x},
+        ])
+
 
 class MergeProbLineTest(unittest.TestCase):
+    maxDiff = None
     def check(self, a, b):
         merge_prob_line(a)
         check_and_clean_row(a)
@@ -150,8 +179,22 @@ class MergeProbLineTest(unittest.TestCase):
           {0: 1.},
         ])
 
+    def test_7(self):
+        self.check([
+          {0: .125, (4, 1): .5, (4, 2): .25, (4, 3): .125},
+          {0: .5, (4, 2): .25, (4, 3): .25},
+          {0: .875, (4, 3): .125},
+          {0: 1.},
+        ], [
+          {0: .125, 4: .375, 8: .5},
+          {0: .875, 4: .125},
+          {0: 1.},
+          {0: 1.},
+        ])
+
 
 class ProbLineTest(unittest.TestCase):
+    maxDiff = None
     def check(self, a, b):
         flow_prob_line(a)
         merge_prob_line(a)

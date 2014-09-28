@@ -93,7 +93,9 @@ def flow_prob_line(row):
         for cur_idx in range(i - 1, -1, -1):
             cur = row2[cur_idx]
             prev = row2[cur_idx + 1]
-            pass_prob *= cur.get(0, 0.)
+            prev_whole = sum(map(lambda x: x[1], filter(lambda x: x[0] == 0 or x[0][1] >= i, prev.items())))
+            #print('prev_whole={}'.format(prev_whole))
+            pass_prob *= cur.get(0, 0.) / prev_whole
             #print('sub (pass={}): #{} {}'.format(pass_prob, cur_idx, cur))
             if pass_prob == 0.:
                 break
@@ -110,6 +112,8 @@ def flow_prob_line(row):
             if flowsum != 0.:
                 cur[0] = cur.get(0, 0.) - flowsum
                 prev[0] = prev.get(0, 0.) + flowsum
+            #print('  current state {}'.format(row2))
+        #print('current state {}'.format(row2))
     row.clear()
     for v in row2:
         row.append(v)
