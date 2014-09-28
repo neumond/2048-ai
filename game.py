@@ -2,6 +2,7 @@ import random
 from math import log
 from os.path import getmtime
 from numprint import print_state
+from itertools import product
 
 
 size = 4
@@ -156,6 +157,100 @@ def _add_dict(a, b):
     return r
 
 
+def _merge_affected(d, number, level):
+    return list(filter(lambda x: isinstance(x[0], tuple) and x[0][0] == number and x[0][1] > level, d.items()))
+
+
+def _order_sums(d):  # used for merge
+    s = list(map(lambda x: -1 if x == 0 else x[1], filter(lambda x: isinstance(x, tuple), d.keys())))
+    if not s:
+        return []
+    maxlevel = max(s)
+    result = []
+    for level in range(maxlevel):
+        s = sum(map(lambda x: x[1], filter(lambda x: x[0] == 0 or (isinstance(x[0], tuple) and x[0][1] > level), d.items())))
+        assert 0. <= s <= 1.
+        result.append(s)
+    return result
+
+
+def filter_above_level(d, level, zerocut):
+    r = dict(filter(lambda x: x[0] == 0 or (isinstance(x[0], tuple) and x[0][1] > level), d.items()))
+    r[0] = r.get(0, 0.) - zerocut
+    assert r[0] >= 0.
+    return r
+
+
+def _d_add(d, k, val):
+    d[k] = d.get(k, 0) + val
+
+
+def _d_getzero(d):
+    return d.get(0, 0.)
+
+
+def _d_filter_level(d, func):
+    return map(lambda x: list(x), filter(lambda x: x[0] != 0 and func(x[0][1]), d.items()))
+
+
+def merge_cells(base, add):
+    def check_item(item):
+        #print('check {}'.format(item))
+        assert item[1] >= 0.
+
+    def filter_items(items):
+        return list(filter(lambda x: x[1] > 0., items))
+
+    def convert_zero_back(d):
+        if (0, -1) in d:
+            d[0] = d.pop((0, -1))
+        else:
+            d[0] = 0.
+
+    # all keys, except 0, must be tuples
+    base_result = {}
+    add_result = {}
+    base_super_range = sum(map(lambda x: x[1], base.items()))
+    add_super_range = sum(map(lambda x: x[1], add.items()))
+
+    # remove space
+    s = _d_getzero(base)
+    add_zero = _d_getzero(add) - s
+    assert add_zero >= 0.
+    _d_add(base_result, (0, -1), s)
+    _d_add(add_result, (0, -1), s)
+
+    base_items = []
+    add_items = [[(0, -1), add_zero]]
+    del add_zero
+    for level in range(size - 1, -1, -1):
+        add_items.extend(list(_d_filter_level(add, lambda x: x == level + 1)))
+        base_items.extend(list(_d_filter_level(base, lambda x: x == level)))
+        add_range = sum(map(lambda x: x[1], add_items))
+        item_apply = []
+        for add_item, base_item in product(add_items, base_items):
+            intersect = (base_item[1]) * (add_item[1] / add_range) * (1. / base_super_range)
+            if add_item[0][0] == base_item[0][0]:
+                # equal numbers, can merge
+                _d_add(base_result, add_item[0][0] * 2, intersect)
+                item_apply.append((base_item, intersect))
+                item_apply.append((add_item, intersect))
+            else:
+                # not equal, cannot merge
+                _d_add(base_result, base_item[0], intersect)
+                _d_add(add_result, add_item[0], intersect)
+                item_apply.append((base_item, intersect))
+                item_apply.append((add_item, intersect))
+        for item, intersect in item_apply:
+            item[1] -= intersect
+            check_item(item)
+        add_items = filter_items(add_items)
+        base_items = filter_items(base_items)
+    convert_zero_back(base_result)
+    convert_zero_back(add_result)
+    return base_result, add_result
+
+
 def merge_prob_line(row):
     for cur_idx in range(len(row) - 1):
         nxt_idx = cur_idx + 1
@@ -164,28 +259,38 @@ def merge_prob_line(row):
         print('         {}'.format(nxt))
         total_shift_prob = 0.
         total_sum = _dict_sum(nxt)
-        for number, cur_prob in sorted(cur.copy().items(), key=lambda x: -1 if x[0] == 0 else x[0][1]):
-            if number == 0 or cur_prob == 0.:
+        levels = _order_sums(nxt)
+        shift_levels = {}
+        for nkey, cur_prob in sorted(cur.copy().items(), key=lambda x: -1 if x[0] == 0 else x[0][1]):
+            if not isinstance(nkey, tuple) or cur_prob == 0.:
                 continue
-            print('  checking {}'.format(number))
-            n2 = number[0] * 2
-            affected_nxt_items = list(filter(lambda x: x[0][0] == number[0] and x[0][1] > number[1], filter(lambda x: x[0] != 0, nxt.items())))
+            number, level = nkey
+            print(' +checking {}'.format(nkey))
+            n2 = number * 2
+            affected_nxt_items = _merge_affected(nxt, number, level)
             print('  affected={}'.format(affected_nxt_items))
+            lvlsum = levels[level] if level < len(levels) else nxt.get(0, 0.)
+
             nxt_prob = sum(map(lambda x: x[1], affected_nxt_items))
-            #print('nxt_prob={}'.format(nxt_prob))
+            print('  nxt_prob={}/{}'.format(nxt_prob, lvlsum))
             if nxt_prob == 0.:
                 continue
-            merge_prob = min(cur_prob, nxt_prob)
-            print('  num={}, merge={}'.format(number[0], merge_prob))
+
+            nxt_prob /= lvlsum  # expand narrowed range to 0..1
+            merge_prob = cur_prob * nxt_prob
+
+            print('  num={}, merge={}'.format(number, merge_prob))
             total_shift_prob += merge_prob
-            cur[number] = cur_prob - merge_prob
+
+            cur[nkey] = cur_prob - merge_prob
             cur[n2] = cur.get(n2, 0.) + merge_prob
             for k, v in affected_nxt_items:
-                #nxt[k] *= 1 - cur_prob
                 nxt[k] = nxt[k] - merge_prob * (nxt[k] / nxt_prob)
-            #nxt[number] = nxt_prob - merge_prob
             nxt[0] = nxt.get(0, 0.) + merge_prob
-        if total_shift_prob != 0.:
+
+            #_affected_levels
+        print('  After merge: {}'.format(cur))
+        if total_shift_prob != 0. and False:
             print('Shift at #{} with k={}'.format(nxt_idx, total_shift_prob))
             print('  before shift {}'.format(row))
             for shift_idx in range(nxt_idx + 1, len(row)):
@@ -200,7 +305,7 @@ def merge_prob_line(row):
                 row[shift_idx - 1] = a
                 row[shift_idx] = b
             #row[-1][0] = row[-1].get(0, 0.) + total_shift_prob
-            print('  after shift {}'.format(row))
+            print('  after shift  {}'.format(row))
     # flatten dicts
     for cur in row:
         for k, v in cur.copy().items():

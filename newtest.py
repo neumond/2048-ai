@@ -133,6 +133,37 @@ class FlowProbLineTest(unittest.TestCase):
         ])
 
 
+class MergeCellTest(unittest.TestCase):
+    maxDiff = None
+
+    def test_1(self):
+        b, a = merge_cells({
+            (4, 0): 8/16,
+            (4, 1): 4/16,
+            (4, 2): 2/16,
+            (4, 3): 1/16,
+            0: 1/16,
+        }, {
+            (4, 1): 4/16,
+            (4, 2): 4/16,
+            (4, 3): 3/16,
+            0: 5/16,
+        })
+        self.assertEqual(b, {
+            8: 11/16,
+            (4, 0): 1/16,
+            (4, 1): 1/16,
+            (4, 2): 1/16,
+            (4, 3): 1/16,
+            0: 1/16,
+        })
+        #self.assertEqual(a, {
+            #(4, 2): 2/16,
+            #(4, 3): 3/16,
+            #0: 11/16,
+        #})
+
+
 class MergeProbLineTest(unittest.TestCase):
     maxDiff = None
     def check(self, a, b):
@@ -188,6 +219,20 @@ class MergeProbLineTest(unittest.TestCase):
         ], [
           {0: .125, 4: .375, 8: .5},
           {0: .875, 4: .125},
+          {0: 1.},
+          {0: 1.},
+        ])
+
+    def test_8(self):
+        x = 1/16
+        self.check([
+          {0: 1*x, (4, 0): 8*x, (4, 1): 4*x, (4, 2): 2*x, (4, 3): x},
+          {0: 5*x, (4, 1): 4*x, (4, 2): 4*x, (4, 3): 3*x},
+          {0: 11*x, (4, 2): 2*x, (4, 3): 3*x},
+          {0: 15*x, (4, 3): x},
+        ], [
+          {0: x, 4: 4*x, 8: 11*x},
+          {0: 11*x, 4: 4*x, 8: x},
           {0: 1.},
           {0: 1.},
         ])
