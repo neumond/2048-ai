@@ -262,22 +262,35 @@ def shift_prob_line(row, toidx, levels):
         src = row[target_idx + 1]
         target = row[target_idx]
 
-        items = [((0, -1), _d_getzero(src))]
         for level in range(size - 1, -1, -1):
-            #print('=== level', level)
-            items.extend(_d_filter_level(src, lambda x: x == level))
-            items_range = sum(map(lambda x: x[1], items))
-            assert items_range >= levels.get(level, 0.)
-            if items_range == 0.:
-                continue
-            for item in items:
-                intersect = item[1] * levels.get(level, .0) / items_range
-                #print('inter {}'.format(intersect))
-                key = 0 if item[0] == (0, -1) else item[0]
-                _d_add(target, key, intersect)
-                _d_add(src, key, -intersect)  # TODO: apply immediately or defer?
-                #if item[0][1] < size:
-                _d_add(next_levels, item[0][1], intersect)
+            levK = levels.get(level, 0.)  # taken amount from pyramid base, we need compensate it
+            items = list(_d_filter_level(src, lambda x: x >= level))  # affected pyramid part
+            #print('=== level #{} K={} items={}'.format(level, levK, items))
+            #items.extend(_d_filter_level(src, lambda x: x == level))
+            zero_range = 0.
+            items_range = sum(map(lambda x: x[1], items))  # size of next level of pyramid
+            if items_range < levK:  # level falls completely
+                zero_range = levK - items_range
+                assert zero_range <= _d_getzero(src)
+            #print('items_range={} zero_range={}'.format(items_range, zero_range))
+            workedK = 0.
+            if items_range + zero_range > 0.:
+                for item in items:
+                    intersect = item[1] * levK / (items_range + zero_range)
+                    #print('inter {}: {}'.format(item[0], intersect))
+                    key = item[0]
+                    _d_add(target, key, intersect)
+                    _d_add(src, key, -intersect)  # TODO: apply immediately or defer?
+                    _d_add(next_levels, item[0][1], intersect)
+                    workedK += intersect
+            if workedK < levK:
+                intersect = levK - workedK
+                #print('inter {}: {}'.format(0, intersect))
+                assert intersect <= zero_range
+                _d_add(target, 0, intersect)
+                _d_add(src, 0, -intersect)
+                _d_add(next_levels, -1, intersect)
+            #print('state after level', target, ' <- ', src)
 
         if -1 in levels:
             #print('=== level -1')
@@ -288,7 +301,7 @@ def shift_prob_line(row, toidx, levels):
             _d_add(next_levels, -1, intersect)
 
         levels = next_levels
-        #print(sm, sum(levels.values()))
+        #print('levelstats', sm, sum(levels.values()), levels)
         assert sm == sum(levels.values())
     _d_add(row[size - 1], 0, sm)
     #print(row)
@@ -302,13 +315,13 @@ def merge_prob_line(row):
         cur, nxt, shift_levels = merge_cells(cur, nxt)
         row[cur_idx] = cur
         row[nxt_idx] = nxt
-        print('shfts', shift_levels)
+        #print('shfts', shift_levels)
 
         if shift_levels:
-            print('before shift ', row)
-            print(shift_levels)
+            #print('before shift ', row)
+            #print(shift_levels)
             shift_prob_line(row, nxt_idx, shift_levels)
-            print('after shift ', row)
+            #print('after shift ', row)
 
     # flatten dicts
     for cur in row:
