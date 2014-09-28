@@ -130,25 +130,53 @@ def merge_line(row):
             row[-1] = 0
 
 
+def _dict_sum(d):
+    return sum(list(map(lambda x: x[1], filter(lambda x: x[0] != 0, d.items()))))
+
+
+def _mult_dict(d, koef):
+    zero = d.get(0, 0.)
+    sm = _dict_sum(d)
+    zero += sm - sm * koef
+    r = {k: v * koef if k != 0 else zero for k, v in d.items()}
+    if 0 not in r:
+        r[0] = zero
+    return r
+
+
+def _add_dict(a, b):
+    r = a.copy()
+    sm = _dict_sum(b)
+    zero = a.get(0, 0.) - sm
+    if zero < 0.:
+        raise Exception('Adding dict with overflow: {} + {}'.format(a, b))
+    for k, v in b.items():
+        r[k] = r.get(k, 0.) + v
+    r[0] = zero
+    return r
+
+
 def merge_prob_line(row):
     for cur_idx in range(len(row) - 1):
         nxt_idx = cur_idx + 1
         cur, nxt = row[cur_idx], row[nxt_idx]
-        #print('Base #{} {}'.format(cur_idx, cur))
-        #print('         {}'.format(nxt))
+        print('Base #{} {}'.format(cur_idx, cur))
+        print('         {}'.format(nxt))
         total_shift_prob = 0.
-        for number, cur_prob in cur.copy().items():
-            if number == 0:
+        total_sum = _dict_sum(nxt)
+        for number, cur_prob in sorted(cur.copy().items(), key=lambda x: -1 if x[0] == 0 else x[0][1]):
+            if number == 0 or cur_prob == 0.:
                 continue
+            print('  checking {}'.format(number))
             n2 = number[0] * 2
             affected_nxt_items = list(filter(lambda x: x[0][0] == number[0] and x[0][1] > number[1], filter(lambda x: x[0] != 0, nxt.items())))
-            #print('  affected={}'.format(affected_nxt_items))
+            print('  affected={}'.format(affected_nxt_items))
             nxt_prob = sum(map(lambda x: x[1], affected_nxt_items))
             #print('nxt_prob={}'.format(nxt_prob))
-            if cur_prob == 0. or nxt_prob == 0.:
+            if nxt_prob == 0.:
                 continue
             merge_prob = min(cur_prob, nxt_prob)
-            #print('  num={}, merge={}'.format(number[0], merge_prob))
+            print('  num={}, merge={}'.format(number[0], merge_prob))
             total_shift_prob += merge_prob
             cur[number] = cur_prob - merge_prob
             cur[n2] = cur.get(n2, 0.) + merge_prob
@@ -158,17 +186,21 @@ def merge_prob_line(row):
             #nxt[number] = nxt_prob - merge_prob
             nxt[0] = nxt.get(0, 0.) + merge_prob
         if total_shift_prob != 0.:
-            #print('Shift at #{} with k={}'.format(nxt_idx, total_shift_prob))
-            #print('  before shift {}'.format(row))
+            print('Shift at #{} with k={}'.format(nxt_idx, total_shift_prob))
+            print('  before shift {}'.format(row))
             for shift_idx in range(nxt_idx + 1, len(row)):
-                # a = b * prob + a * (1 - prob)
+                # a = b * prob
+                # b = b * (1 - prob)
                 a, b = row[shift_idx - 1], row[shift_idx]
-                a = {k: v * (1 - total_shift_prob) for k, v in a.items()}
-                for k, v in b.items():
-                    a[k] = a.get(k, 0.) + v * total_shift_prob
-            row[-1] = {k: v * (1 - total_shift_prob) for k, v in a.items()}
-            row[-1][0] = row[-1].get(0, 0.) + total_shift_prob
-            #print('  after shift {}'.format(row))
+                #assert sum(list(a.values())) == 1.
+                #assert sum(list(b.values())) == 1.
+                k = total_shift_prob / total_sum
+                a = _add_dict(a, _mult_dict(b, k))
+                b = _mult_dict(b, 1 - k)
+                row[shift_idx - 1] = a
+                row[shift_idx] = b
+            #row[-1][0] = row[-1].get(0, 0.) + total_shift_prob
+            print('  after shift {}'.format(row))
     # flatten dicts
     for cur in row:
         for k, v in cur.copy().items():
