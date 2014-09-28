@@ -194,10 +194,6 @@ def _d_filter_level(d, func):
 
 
 def merge_cells(base, add):
-    def check_item(item):
-        #print('check {}'.format(item))
-        assert item[1] >= 0.
-
     def filter_items(items):
         return list(filter(lambda x: x[1] > 0., items))
 
@@ -216,25 +212,30 @@ def merge_cells(base, add):
     # remove space
     s = _d_getzero(base)
     add_zero = _d_getzero(add) - s
-    assert add_zero >= 0.
+    if add_zero < 0.:
+        raise Exception('add_zero < 0 ({}), probably bad input, must be valid Flow result'.format(add_zero))
     _d_add(base_result, (0, -1), s)
     _d_add(add_result, (0, -1), s)
 
     base_items = []
     add_items = [[(0, -1), add_zero]]
     del add_zero
+    shift_levels = {}
     for level in range(size - 1, -1, -1):
         add_items.extend(list(_d_filter_level(add, lambda x: x == level + 1)))
         base_items.extend(list(_d_filter_level(base, lambda x: x == level)))
         add_range = sum(map(lambda x: x[1], add_items))
+        if add_range == 0.:
+            continue
         item_apply = []
         for add_item, base_item in product(add_items, base_items):
             intersect = (base_item[1]) * (add_item[1] / add_range) * (1. / base_super_range)
-            if add_item[0][0] == base_item[0][0]:
+            if add_item[0][0] == base_item[0][0] and add_item[0][1] > base_item[0][1]:
                 # equal numbers, can merge
                 _d_add(base_result, add_item[0][0] * 2, intersect)
                 item_apply.append((base_item, intersect))
                 item_apply.append((add_item, intersect))
+                _d_add(shift_levels, add_item[0][1], intersect)
             else:
                 # not equal, cannot merge
                 _d_add(base_result, base_item[0], intersect)
@@ -243,77 +244,145 @@ def merge_cells(base, add):
                 item_apply.append((add_item, intersect))
         for item, intersect in item_apply:
             item[1] -= intersect
-            check_item(item)
+            if item[1] < -0.0001:
+                raise Exception('After applying intersect item became negative: - {} = {}'.format(intersect, item[1]))
         add_items = filter_items(add_items)
         base_items = filter_items(base_items)
     convert_zero_back(base_result)
     convert_zero_back(add_result)
-    return base_result, add_result
+    return base_result, add_result, shift_levels
+
+
+def shift_prob_line(row, toidx, levels):
+    sm = sum(levels.values())
+    #print('ORIGINAL LEVELS', levels, sm)
+    for target_idx in range(toidx, size - 1, 1):
+        #print('====== index {} -> {} with levels {}'.format(target_idx + 1, target_idx, levels))
+        next_levels = {}
+        src = row[target_idx + 1]
+        target = row[target_idx]
+
+        items = [((0, -1), _d_getzero(src))]
+        for level in range(size - 1, -1, -1):
+            #print('=== level', level)
+            items.extend(_d_filter_level(src, lambda x: x == level))
+            items_range = sum(map(lambda x: x[1], items))
+            assert items_range >= levels.get(level, 0.)
+            if items_range == 0.:
+                continue
+            for item in items:
+                intersect = item[1] * levels.get(level, .0) / items_range
+                #print('inter {}'.format(intersect))
+                key = 0 if item[0] == (0, -1) else item[0]
+                _d_add(target, key, intersect)
+                _d_add(src, key, -intersect)  # TODO: apply immediately or defer?
+                #if item[0][1] < size:
+                _d_add(next_levels, item[0][1], intersect)
+
+        if -1 in levels:
+            #print('=== level -1')
+            intersect = levels[-1]
+            #print('inter {}'.format(intersect))
+            _d_add(target, 0, intersect)
+            _d_add(src, 0, -intersect)  # TODO: apply immediately or defer?
+            _d_add(next_levels, -1, intersect)
+
+        levels = next_levels
+        #print(sm, sum(levels.values()))
+        assert sm == sum(levels.values())
+    _d_add(row[size - 1], 0, sm)
+    #print(row)
 
 
 def merge_prob_line(row):
     for cur_idx in range(len(row) - 1):
         nxt_idx = cur_idx + 1
         cur, nxt = row[cur_idx], row[nxt_idx]
-        print('Base #{} {}'.format(cur_idx, cur))
-        print('         {}'.format(nxt))
-        total_shift_prob = 0.
-        total_sum = _dict_sum(nxt)
-        levels = _order_sums(nxt)
-        shift_levels = {}
-        for nkey, cur_prob in sorted(cur.copy().items(), key=lambda x: -1 if x[0] == 0 else x[0][1]):
-            if not isinstance(nkey, tuple) or cur_prob == 0.:
-                continue
-            number, level = nkey
-            print(' +checking {}'.format(nkey))
-            n2 = number * 2
-            affected_nxt_items = _merge_affected(nxt, number, level)
-            print('  affected={}'.format(affected_nxt_items))
-            lvlsum = levels[level] if level < len(levels) else nxt.get(0, 0.)
 
-            nxt_prob = sum(map(lambda x: x[1], affected_nxt_items))
-            print('  nxt_prob={}/{}'.format(nxt_prob, lvlsum))
-            if nxt_prob == 0.:
-                continue
+        cur, nxt, shift_levels = merge_cells(cur, nxt)
+        row[cur_idx] = cur
+        row[nxt_idx] = nxt
+        print('shfts', shift_levels)
 
-            nxt_prob /= lvlsum  # expand narrowed range to 0..1
-            merge_prob = cur_prob * nxt_prob
+        if shift_levels:
+            print('before shift ', row)
+            print(shift_levels)
+            shift_prob_line(row, nxt_idx, shift_levels)
+            print('after shift ', row)
 
-            print('  num={}, merge={}'.format(number, merge_prob))
-            total_shift_prob += merge_prob
-
-            cur[nkey] = cur_prob - merge_prob
-            cur[n2] = cur.get(n2, 0.) + merge_prob
-            for k, v in affected_nxt_items:
-                nxt[k] = nxt[k] - merge_prob * (nxt[k] / nxt_prob)
-            nxt[0] = nxt.get(0, 0.) + merge_prob
-
-            #_affected_levels
-        print('  After merge: {}'.format(cur))
-        if total_shift_prob != 0. and False:
-            print('Shift at #{} with k={}'.format(nxt_idx, total_shift_prob))
-            print('  before shift {}'.format(row))
-            for shift_idx in range(nxt_idx + 1, len(row)):
-                # a = b * prob
-                # b = b * (1 - prob)
-                a, b = row[shift_idx - 1], row[shift_idx]
-                #assert sum(list(a.values())) == 1.
-                #assert sum(list(b.values())) == 1.
-                k = total_shift_prob / total_sum
-                a = _add_dict(a, _mult_dict(b, k))
-                b = _mult_dict(b, 1 - k)
-                row[shift_idx - 1] = a
-                row[shift_idx] = b
-            #row[-1][0] = row[-1].get(0, 0.) + total_shift_prob
-            print('  after shift  {}'.format(row))
     # flatten dicts
     for cur in row:
         for k, v in cur.copy().items():
             if not isinstance(k, tuple):
                 continue
             number = k[0]
-            cur[number] = cur.get(number, 0.) + v
+            _d_add(cur, number, v)
             del cur[k]
+
+
+#def merge_prob_line(row):
+    #for cur_idx in range(len(row) - 1):
+        #nxt_idx = cur_idx + 1
+        #cur, nxt = row[cur_idx], row[nxt_idx]
+        #print('Base #{} {}'.format(cur_idx, cur))
+        #print('         {}'.format(nxt))
+        #total_shift_prob = 0.
+        #total_sum = _dict_sum(nxt)
+        #levels = _order_sums(nxt)
+        #shift_levels = {}
+        #for nkey, cur_prob in sorted(cur.copy().items(), key=lambda x: -1 if x[0] == 0 else x[0][1]):
+            #if not isinstance(nkey, tuple) or cur_prob == 0.:
+                #continue
+            #number, level = nkey
+            #print(' +checking {}'.format(nkey))
+            #n2 = number * 2
+            #affected_nxt_items = _merge_affected(nxt, number, level)
+            #print('  affected={}'.format(affected_nxt_items))
+            #lvlsum = levels[level] if level < len(levels) else nxt.get(0, 0.)
+
+            #nxt_prob = sum(map(lambda x: x[1], affected_nxt_items))
+            #print('  nxt_prob={}/{}'.format(nxt_prob, lvlsum))
+            #if nxt_prob == 0.:
+                #continue
+
+            #nxt_prob /= lvlsum  # expand narrowed range to 0..1
+            #merge_prob = cur_prob * nxt_prob
+
+            #print('  num={}, merge={}'.format(number, merge_prob))
+            #total_shift_prob += merge_prob
+
+            #cur[nkey] = cur_prob - merge_prob
+            #cur[n2] = cur.get(n2, 0.) + merge_prob
+            #for k, v in affected_nxt_items:
+                #nxt[k] = nxt[k] - merge_prob * (nxt[k] / nxt_prob)
+            #nxt[0] = nxt.get(0, 0.) + merge_prob
+
+            ##_affected_levels
+        #print('  After merge: {}'.format(cur))
+        #if total_shift_prob != 0. and False:
+            #print('Shift at #{} with k={}'.format(nxt_idx, total_shift_prob))
+            #print('  before shift {}'.format(row))
+            #for shift_idx in range(nxt_idx + 1, len(row)):
+                ## a = b * prob
+                ## b = b * (1 - prob)
+                #a, b = row[shift_idx - 1], row[shift_idx]
+                ##assert sum(list(a.values())) == 1.
+                ##assert sum(list(b.values())) == 1.
+                #k = total_shift_prob / total_sum
+                #a = _add_dict(a, _mult_dict(b, k))
+                #b = _mult_dict(b, 1 - k)
+                #row[shift_idx - 1] = a
+                #row[shift_idx] = b
+            ##row[-1][0] = row[-1].get(0, 0.) + total_shift_prob
+            #print('  after shift  {}'.format(row))
+    ## flatten dicts
+    #for cur in row:
+        #for k, v in cur.copy().items():
+            #if not isinstance(k, tuple):
+                #continue
+            #number = k[0]
+            #cur[number] = cur.get(number, 0.) + v
+            #del cur[k]
 
 
 def check_and_clean_row(row):

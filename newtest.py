@@ -137,7 +137,7 @@ class MergeCellTest(unittest.TestCase):
     maxDiff = None
 
     def test_1(self):
-        b, a = merge_cells({
+        b, a, sh = merge_cells({
             (4, 0): 8/16,
             (4, 1): 4/16,
             (4, 2): 2/16,
@@ -157,11 +157,42 @@ class MergeCellTest(unittest.TestCase):
             (4, 3): 1/16,
             0: 1/16,
         })
+        #self.assertEqual(sh, {})
         #self.assertEqual(a, {
             #(4, 2): 2/16,
             #(4, 3): 3/16,
             #0: 11/16,
         #})
+
+    def test_2(self):
+        b, a, sh = merge_cells({
+            (4, 1): 8/16,
+            0: 8/16,
+        }, {
+            (4, 2): 2/16,
+            (8, 2): 2/16,
+            0: 12/16,
+        })
+        self.assertEqual(b, {0: 0.5, 8: 0.125, (4, 1): 0.375})
+        self.assertEqual(a, {
+            (8, 2): 2/16,
+            0: 12/16,
+        })
+        self.assertEqual(sh, {2: 2/16})
+
+    def test_2_1(self):
+        b, a, sh = merge_cells({
+          0: 2/16,
+          (2, 2): 4/16,
+          (2, 3): 2/16,
+          (4, 1): 8/16,
+        }, {
+          0: 10/16,
+          (2, 3): 6/16,
+        })
+        self.assertEqual(b, {0: 2/16, (2, 2): 2/16, (2, 3): 2/16, (4, 1): 8/16, 4: 2/16})
+        self.assertEqual(a, {0: 10/16, (2, 3): 4/16})
+        self.assertEqual(sh, {3: 2/16})
 
 
 class MergeProbLineTest(unittest.TestCase):
@@ -186,13 +217,13 @@ class MergeProbLineTest(unittest.TestCase):
 
     def test_2(self):
         self.check([
-          {0: .25, (2, 2): .25, (4, 1): .5},
-          {(2, 3): 1.},
+          {0: 2/16, (2, 2): 4/16, (2, 3): 2/16, (4, 1): 8/16},
+          {0: 10/16, (2, 3): 6/16},
           {0: 1.},
           {0: 1.},
         ], [
-          {0: .25, 4: .75},
-          {0: .25, 2: .75},
+          {0: 2/16, 2: 4/16, 4: 10/16},
+          {0: 12/16, 2: 4/16},
           {0: 1.},
           {0: 1.},
         ])
@@ -217,8 +248,8 @@ class MergeProbLineTest(unittest.TestCase):
           {0: .875, (4, 3): .125},
           {0: 1.},
         ], [
-          {0: .125, 4: .375, 8: .5},
-          {0: .875, 4: .125},
+          {0: 1/8, 4: 3/8, 8: 4/8},
+          {0: 7/8, 4: 1/8},
           {0: 1.},
           {0: 1.},
         ])
