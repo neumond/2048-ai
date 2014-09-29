@@ -9,6 +9,7 @@ from copy import deepcopy
 size = 4
 KOEF = 0.4
 epsilon = 0.001
+prob_4 = 1/3  # TODO: not actually proper, original game have 10%
 
 
 def get_val(s, x, y):
@@ -91,15 +92,12 @@ def flow_prob_line(row):
     row2 = [{(k, i) if k != 0 else 0: v for k, v in v.items()} for i, v in enumerate(row)]
     for i, v in enumerate(row2):
         v = v.copy()
-        #print('base: #{} {}'.format(i, v))
         pass_prob = 1.
         for cur_idx in range(i - 1, -1, -1):
             cur = row2[cur_idx]
             prev = row2[cur_idx + 1]
             prev_whole = sum(map(lambda x: x[1], filter(lambda x: x[0] == 0 or x[0][1] >= i, prev.items())))
-            #print('prev_whole={}'.format(prev_whole))
             pass_prob *= cur.get(0, 0.) / prev_whole
-            #print('sub (pass={}): #{} {}'.format(pass_prob, cur_idx, cur))
             if pass_prob == 0.:
                 break
             flowsum = 0.
@@ -107,7 +105,6 @@ def flow_prob_line(row):
                 if number == 0 or prob == 0.:
                     continue
                 flow = prob * pass_prob
-                #print('  numflow (n={}, flow={})'.format(number, flow))
                 if flow != 0.:
                     cur[number] = cur.get(number, 0.) + flow
                     prev[number] = prev.get(number, 0.) - flow
@@ -115,8 +112,6 @@ def flow_prob_line(row):
             if flowsum != 0.:
                 cur[0] = cur.get(0, 0.) - flowsum
                 prev[0] = prev.get(0, 0.) + flowsum
-            #print('  current state {}'.format(row2))
-        #print('current state {}'.format(row2))
     row.clear()
     for v in row2:
         row.append(v)
@@ -133,56 +128,6 @@ def merge_line(row):
             row[-1] = 0
 
 
-def _dict_sum(d):
-    return sum(list(map(lambda x: x[1], filter(lambda x: x[0] != 0, d.items()))))
-
-
-def _mult_dict(d, koef):
-    zero = d.get(0, 0.)
-    sm = _dict_sum(d)
-    zero += sm - sm * koef
-    r = {k: v * koef if k != 0 else zero for k, v in d.items()}
-    if 0 not in r:
-        r[0] = zero
-    return r
-
-
-def _add_dict(a, b):
-    r = a.copy()
-    sm = _dict_sum(b)
-    zero = a.get(0, 0.) - sm
-    if zero < 0.:
-        raise Exception('Adding dict with overflow: {} + {}'.format(a, b))
-    for k, v in b.items():
-        r[k] = r.get(k, 0.) + v
-    r[0] = zero
-    return r
-
-
-def _merge_affected(d, number, level):
-    return list(filter(lambda x: isinstance(x[0], tuple) and x[0][0] == number and x[0][1] > level, d.items()))
-
-
-def _order_sums(d):  # used for merge
-    s = list(map(lambda x: -1 if x == 0 else x[1], filter(lambda x: isinstance(x, tuple), d.keys())))
-    if not s:
-        return []
-    maxlevel = max(s)
-    result = []
-    for level in range(maxlevel):
-        s = sum(map(lambda x: x[1], filter(lambda x: x[0] == 0 or (isinstance(x[0], tuple) and x[0][1] > level), d.items())))
-        assert 0. <= s <= 1.
-        result.append(s)
-    return result
-
-
-def filter_above_level(d, level, zerocut):
-    r = dict(filter(lambda x: x[0] == 0 or (isinstance(x[0], tuple) and x[0][1] > level), d.items()))
-    r[0] = r.get(0, 0.) - zerocut
-    assert r[0] >= 0.
-    return r
-
-
 def _d_add(d, k, val):
     d[k] = d.get(k, 0) + val
 
@@ -196,9 +141,6 @@ def _d_filter_level(d, func):
 
 
 def merge_cells(base, add):
-    #print('lol')
-    #print(base)
-    #print(add)
     def filter_items(items):
         return list(filter(lambda x: x[1] > 0., items))
 
@@ -231,9 +173,6 @@ def merge_cells(base, add):
     for level in range(size - 1, -1, -1):
         add_items.extend(list(_d_filter_level(add, lambda x: x == level + 1)))
         base_items.extend(list(_d_filter_level(base, lambda x: x == level)))
-        #print('LEVEL', level)
-        #print('base_items', base_items)
-        #print('add_items', add_items)
         add_range = sum(map(lambda x: x[1], add_items))
         if add_range == 0.:
             continue
@@ -265,9 +204,7 @@ def merge_cells(base, add):
 
 def shift_prob_line(row, toidx, levels):
     sm = sum(levels.values())
-    #print('ORIGINAL LEVELS', levels, sm)
     for target_idx in range(toidx, size - 1, 1):
-        #print('====== index {} -> {} with levels {}'.format(target_idx + 1, target_idx, levels))
         next_levels = {}
         src = row[target_idx + 1]
         target = row[target_idx]
@@ -275,19 +212,15 @@ def shift_prob_line(row, toidx, levels):
         for level in range(size - 1, -1, -1):
             levK = levels.get(level, 0.)  # taken amount from pyramid base, we need compensate it
             items = list(_d_filter_level(src, lambda x: x >= level))  # affected pyramid part
-            #print('=== level #{} K={} items={}'.format(level, levK, items))
-            #items.extend(_d_filter_level(src, lambda x: x == level))
             zero_range = 0.
             items_range = sum(map(lambda x: x[1], items))  # size of next level of pyramid
             if items_range < levK:  # level falls completely
                 zero_range = levK - items_range
                 assert zero_range <= _d_getzero(src) + epsilon
-            #print('items_range={} zero_range={}'.format(items_range, zero_range))
             workedK = 0.
             if items_range + zero_range > 0.:
                 for item in items:
                     intersect = item[1] * levK / (items_range + zero_range)
-                    #print('inter {}: {}'.format(item[0], intersect))
                     key = item[0]
                     _d_add(target, key, intersect)
                     _d_add(src, key, -intersect)  # TODO: apply immediately or defer?
@@ -295,67 +228,20 @@ def shift_prob_line(row, toidx, levels):
                     workedK += intersect
             if workedK < levK:
                 intersect = levK - workedK
-                #print('inter {}: {}'.format(0, intersect))
-                #print(intersect, zero_range)
                 assert intersect <= zero_range + epsilon
                 _d_add(target, 0, intersect)
                 _d_add(src, 0, -intersect)
                 _d_add(next_levels, -1, intersect)
-            #print('state after level', target, ' <- ', src)
 
         if -1 in levels:
-            #print('=== level -1')
             intersect = levels[-1]
-            #print('inter {}'.format(intersect))
             _d_add(target, 0, intersect)
             _d_add(src, 0, -intersect)  # TODO: apply immediately or defer?
             _d_add(next_levels, -1, intersect)
 
         levels = next_levels
-        #print('levelstats', sm, sum(levels.values()), levels)
         assert abs(sm - sum(levels.values())) < epsilon
     _d_add(row[size - 1], 0, sm)
-    #print(row)
-
-
-# debug only, remove
-def print_pyramid(row):
-    prev = None
-    for lvl in range(size - 1, -1, -1):
-        print(color('{:>16} '.format(str(lvl)), color.BLUE), end='')
-    print()
-    for base, v in enumerate(row):
-        ls = {}
-        for k, v in v.items():
-            if k == 0:
-                key = -1
-            else:
-                key = k[1] if isinstance(k, tuple) else base
-            ls[key] = ls.get(key, 0) + int(v * 10000)
-        ls = [ls.get(lvl, 0) for lvl in range(-1, size)]
-        cur = ls.copy()
-        if prev is None:
-            prev = ls.copy()
-        else:
-            B = 0
-            A = 0
-            for lvl in range(size, 0, -1):
-                B = prev[lvl]
-                if lvl < size:
-                    A += cur[lvl+1]
-                line = '{}→{}'.format(A, B)
-                line = '{:>16} '.format(line)
-                if B >= A:
-                    line = color(line, color.GREEN)
-                    B -= A
-                    A = 0
-                else:
-                    line = color(line, color.RED)
-                    A -= B
-                    B = 0
-                print(line, end='')
-            prev = ls.copy()
-            print()
 
 
 # debug only
@@ -385,10 +271,6 @@ def brute_force_row(row, count=1000):
 
 
 def merge_prob_line(row):
-    #from pprint import pprint
-    #print('ENTERING')
-    #pprint(row)
-
     for cur_idx in range(len(row) - 1):
         nxt_idx = cur_idx + 1
         cur, nxt = row[cur_idx], row[nxt_idx]
@@ -396,19 +278,9 @@ def merge_prob_line(row):
         cur, nxt, shift_levels = merge_cells(cur, nxt)
         row[cur_idx] = cur
         row[nxt_idx] = nxt
-        #print('shfts', shift_levels)
-
-        #print('AFTER MERGE')
-        #pprint(row)
 
         if shift_levels:
-            #print('before shift ', row)
-            #print(shift_levels)
             shift_prob_line(row, nxt_idx, shift_levels)
-            #print('after shift ', row)
-            #print('AFTER SHIFT')
-            #pprint(row)
-        #print('NEXT')
 
     # flatten dicts
     for cur in row:
@@ -449,7 +321,6 @@ def probmove(s, direct):
         for c2 in range(*r2args):
             x, y = (c1, c2) if vert else (c2, c1)
             row.append(get_val(s, x, y))
-        print(row)
         check_and_clean_row(row)
         flow_prob_line(row)
         check_and_clean_row(row)
@@ -460,31 +331,8 @@ def probmove(s, direct):
             set_val(s, x, y, row[i])
 
 
-def pathcells(s, direct):
-    backward = direct == 1 or direct == 2
-    vert = direct == 0 or direct == 2
-    r2args = (size - 1, -1, -1) if not backward else (0, size, 1)
-    pcells = 0
-    for c1 in range(size):
-        started = False
-        for c2 in range(*r2args):
-            x, y = (c1, c2) if vert else (c2, c1)
-            v = get_val(s, x, y)
-            if started:
-                if v != 0:
-                    continue
-                pcells += 1
-            else:
-                if v != 0:
-                    started = True
-    return pcells
-
-
 def emptycells(s):
     return len(list(filter(lambda x: x == 0, s)))
-
-
-prob_4 = 1/3  # TODO: not actually proper, original game have 10%
 
 
 def put_random(s):
@@ -549,7 +397,6 @@ def move_tree2(state, backtrack):
     x = []
     for direct in range(4):
         s = deepcopy(state)
-        #print(s)
         probmove(s, direct)
         x.append(move_tree2(s, backtrack - 1))
     return min(x)
@@ -565,7 +412,6 @@ def choose_move(state, backtrack):
         fldsum = move_tree2(make_prob_state(s), backtrack)
         if bestmove is None or fldsum > bestmove:
             bestmove, bestmove_dir = fldsum, direct
-    #print('bestmove={}'.format(bestmove))
     return bestmove_dir
 
 
@@ -581,11 +427,11 @@ def main():
 
     counter = 0
     while True:
-        backtrack = 0
-        if max(s) >= 512:
-            backtrack += 1
-        if max(s) >= 1024:
-            backtrack += 1
+        # adaptive backtrack
+        #if max(s) >= 512:
+            #backtrack += 1
+        #if max(s) >= 1024:
+            #backtrack += 1
         backtrack = 2
         bestmove_dir = choose_move(s, backtrack)
         rnd = False
