@@ -1,7 +1,7 @@
 import random
 from math import log
 from os.path import getmtime
-from numprint import print_state
+from numprint import print_state, color
 from itertools import product
 from copy import deepcopy
 
@@ -196,6 +196,9 @@ def _d_filter_level(d, func):
 
 
 def merge_cells(base, add):
+    #print('lol')
+    #print(base)
+    #print(add)
     def filter_items(items):
         return list(filter(lambda x: x[1] > 0., items))
 
@@ -228,6 +231,9 @@ def merge_cells(base, add):
     for level in range(size - 1, -1, -1):
         add_items.extend(list(_d_filter_level(add, lambda x: x == level + 1)))
         base_items.extend(list(_d_filter_level(base, lambda x: x == level)))
+        #print('LEVEL', level)
+        #print('base_items', base_items)
+        #print('add_items', add_items)
         add_range = sum(map(lambda x: x[1], add_items))
         if add_range == 0.:
             continue
@@ -312,8 +318,77 @@ def shift_prob_line(row, toidx, levels):
     #print(row)
 
 
+# debug only, remove
+def print_pyramid(row):
+    prev = None
+    for lvl in range(size - 1, -1, -1):
+        print(color('{:>16} '.format(str(lvl)), color.BLUE), end='')
+    print()
+    for base, v in enumerate(row):
+        ls = {}
+        for k, v in v.items():
+            if k == 0:
+                key = -1
+            else:
+                key = k[1] if isinstance(k, tuple) else base
+            ls[key] = ls.get(key, 0) + int(v * 10000)
+        ls = [ls.get(lvl, 0) for lvl in range(-1, size)]
+        cur = ls.copy()
+        if prev is None:
+            prev = ls.copy()
+        else:
+            B = 0
+            A = 0
+            for lvl in range(size, 0, -1):
+                B = prev[lvl]
+                if lvl < size:
+                    A += cur[lvl+1]
+                line = '{}→{}'.format(A, B)
+                line = '{:>16} '.format(line)
+                if B >= A:
+                    line = color(line, color.GREEN)
+                    B -= A
+                    A = 0
+                else:
+                    line = color(line, color.RED)
+                    A -= B
+                    B = 0
+                print(line, end='')
+            prev = ls.copy()
+            print()
+
+
+# debug only
+# for testing flow&merge
+def brute_force_row(row, count=1000):
+    flatrow = [list(v.items()) for v in row]  # for stable randoms
+    stats = [{} for v in row]
+    for i in range(count):
+        tryrow = []
+        for item in flatrow:
+            choo = random.random()
+            ch_count = 0.
+            choose = None
+            for k, v in item:
+                ch_count += v
+                if ch_count >= choo:
+                    choose = k
+                    break
+            if choose is None:
+                choose = item[-1][0]
+            tryrow.append(choose)
+        flow_line(tryrow)
+        merge_line(tryrow)
+        for k, item in enumerate(tryrow):
+            _d_add(stats[k], item, 1)
+    return [{k: v/count for k, v in item.items()} for item in stats]
+
+
 def merge_prob_line(row):
-    #print(row)
+    #from pprint import pprint
+    #print('ENTERING')
+    #pprint(row)
+
     for cur_idx in range(len(row) - 1):
         nxt_idx = cur_idx + 1
         cur, nxt = row[cur_idx], row[nxt_idx]
@@ -323,11 +398,17 @@ def merge_prob_line(row):
         row[nxt_idx] = nxt
         #print('shfts', shift_levels)
 
+        #print('AFTER MERGE')
+        #pprint(row)
+
         if shift_levels:
             #print('before shift ', row)
             #print(shift_levels)
             shift_prob_line(row, nxt_idx, shift_levels)
             #print('after shift ', row)
+            #print('AFTER SHIFT')
+            #pprint(row)
+        #print('NEXT')
 
     # flatten dicts
     for cur in row:
@@ -368,6 +449,7 @@ def probmove(s, direct):
         for c2 in range(*r2args):
             x, y = (c1, c2) if vert else (c2, c1)
             row.append(get_val(s, x, y))
+        print(row)
         check_and_clean_row(row)
         flow_prob_line(row)
         check_and_clean_row(row)

@@ -1,5 +1,6 @@
 import unittest
 from game import *
+from pprint import pprint
 
 # dir: 0 - up, 1 - right, 2 - down, 3 - left
 M_UP = 0
@@ -452,20 +453,7 @@ class ErrorTest(unittest.TestCase):
         print([sum(v.values()) for v in row])
         # check for [1.0, 1.0, 1.0, 1.0]
 
-    def print_pyramid(self, row):
-        for base, v in enumerate(row):
-            ls = {}
-            for k, v in v.items():
-                if k == 0:
-                    continue
-                key = k[1]
-                for lvl in range(key, size):
-                    ls[lvl] = ls.get(lvl, 0) + int(v * 10000)
-            for lvl in range(base, size):
-                print('{:6d} '.format(ls.get(lvl, 0)), end='')
-            print()
-
-    def test_1(self):
+    def t2est_1(self):
         row = [
             {(2, 0): 0.054522618825907865, (8, 2): 0.037228001520718514, (4, 2): 0.7177558693194529,
              (4, 1): 0.02422611589669511, (2, 1): 0.13900608502427172, (4, 0): 0.02726130941295393},
@@ -476,6 +464,18 @@ class ErrorTest(unittest.TestCase):
             {0: 0.9854611882573707, (2, 3): 0.014538811742629276}
         ]
         merge_prob_line(row)
+
+    def tes2t_1_a(self):
+        b = {0: 6.938893903907228e-18, (2, 3): 0.805134857449423, (8, 2): 0.011520754807120524,
+             (4, 2): 0.17777885765314105, (4, 1): 0.0014385190188779256, (2, 1): 0.004127011071437488}
+        a = {0: 0.7937596357779987, (4, 2): 0.01081431330498323, (2, 3): 0.19486514255057713, (8, 2): 0.0005609083664410418}
+        #self.print_row_sums([b, a])
+        merge_cells(b, a)
+
+    def test_x(self):
+        row = [{0: 0.687023382961372, 8: 0.003086098384932204, 2: 0.19630668448602323, 4: 0.11358383416767262}, {2: 0.8671039844509231, 4: 0.13289601554907676}, {0: 0.687023382961372, 8: 0.003086098384932204, 2: 0.19630668448602323, 4: 0.11358383416767262}, {8: 0.9999999999999998}]
+        pprint(row)
+        pprint(brute_force_row(row, count=10000))
 
 
 
