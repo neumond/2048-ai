@@ -95,7 +95,7 @@ def put_random(s):
 
 
 def main():
-    from oldai import choose_move
+    from newai import choose_move
     from numprint import print_state
 
     #from os.path import getmtime
