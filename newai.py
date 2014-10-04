@@ -25,6 +25,17 @@ def _d_filter_level(d, func):
     return map(lambda x: list(x), filter(lambda x: isinstance(x[0], tuple) and func(x[0][1]), d.items()))
 
 
+def _d_merge(a, b):
+    r = deepcopy(a)
+    for k, v in b.items():
+        _d_add(r, k, v)
+    return r
+
+
+def _d_mult(d, t):
+    return {k: v * t for k, v in d.items()}
+
+
 def flow_prob_line(row):
     row2 = [{(k, i) if k != 0 else 0: v for k, v in v.items()} for i, v in enumerate(row)]
     for i, v in enumerate(row2):
@@ -55,7 +66,6 @@ def flow_prob_line(row):
 
 
 def merge_cells(base, add):
-    print(color('Merge cells: base={} add={}'.format(base, add), color.RED))
     def filter_items(items):
         return list(filter(lambda x: x[1] > 0., items))
 
@@ -97,7 +107,6 @@ def merge_cells(base, add):
     for level in range(size - 1, -2, -1):
         add_items.extend(list(_d_filter_level(add, lambda x: x == level + 1)))
         base_items = list(_d_filter_level(base, lambda x: x == level))
-        print('level={} add={} base={}'.format(level, add_items, base_items))
         add_range = sum(map(lambda x: x[1], add_items))
         base_range = sum(map(lambda x: x[1], base_items))
         assert -epsilon < add_range < 1. + epsilon
@@ -112,8 +121,10 @@ def merge_cells(base, add):
             continue
         item_apply = []
         for add_item, base_item in product(add_items, base_items):
-            assert -epsilon < add_item[1] <= 1.
-            assert -epsilon < base_item[1] <= 1.
+            if not(-epsilon < add_item[1] <= 1. + epsilon):
+                raise Exception('Bad add_item: {}'.format(add_item))
+            if not(-epsilon < base_item[1] <= 1. + epsilon):
+                raise Exception('Bad base_item: {}'.format(base_item))
             intersect = (base_item[1]) * (add_item[1] / add_range)  # * (1. / base_super_range)
             if add_item[0][0] == base_item[0][0] and add_item[0][1] > base_item[0][1]:
                 # equal numbers, can merge
@@ -168,19 +179,17 @@ def validate_pyramid_cells(base, add):
         add_range -= base_range
 
 
-def validate_pyramid_line(row, from_index = 0):
+def validate_pyramid_line(row, from_index=0):
     for base, add in zip(row[from_index:], row[from_index + 1:]):
         validate_pyramid_cells(base, add)
 
 
 def shift_prob_line(row, toidx, levels):
-    print(color('Shift levels {}'.format(levels), color.GREEN))
     sm = sum(levels.values())
     for target_idx in range(toidx, size - 1, 1):
         next_levels = {}
         src = row[target_idx + 1]
         target = row[target_idx]
-        print(color('    {}'.format(levels), color.GREEN), '{} <- {}'.format(target, src))
 
         if -1 in levels:
             intersect = levels[-1]
@@ -248,7 +257,7 @@ def brute_force_row(row, count=1000):
 
 
 def merge_prob_line(row):
-    print(color('Merge prob line {}'.format(row), color.BLUE))
+    #print(row)
     validate_pyramid_line(row)
     for cur_idx in range(len(row) - 1):
         nxt_idx = cur_idx + 1
@@ -366,78 +375,104 @@ def required_levels(base, add, merged=False):
 # TODO: rewrite merge_cells
 
 def shift_empty_space(base, add, levels):
-    required = required_levels(base, add, merged=True)
-    validate_pyramid_cells(base, required)
-    print('required levels', required)
-    free = {k: v - _d_get(required, k) for k, v in add.items() if isinstance(k, tuple) or k == 0}
-    print('free levels', free)
-    allowed_zero = _d_getzero(free)
-    if 0 in free:
-        del free[0]
-    levels = levels.copy()
-    next_levels = {}
+    move = {}
+
+    # cut required zero level
+    base0 = _d_getzero(base)
+    rest_zero = _d_getzero(add)
+    if rest_zero < base0 - epsilon:
+        raise InvalidPyramidException
+    rest_zero -= base0
+    del base0
 
     # move zero level
-    if None in levels:
-        amount = levels[None]
-        if amount > allowed_zero:
-            raise InvalidShiftLevelAmountException
-        _d_add(base, 0, amount)
-        _d_add(add, 0, -amount)
-        _d_add(next_levels, None, amount)
-        allowed_zero -= amount
-        del levels[None]
+    amount = _d_get(levels, None)
+    if amount > rest_zero + epsilon:
+        raise InvalidShiftLevelAmountException
+    _d_add(move, 0, amount)
+    rest_zero -= amount
 
-    # move levels
-    for level, lev_amount in sorted(levels.items(), key=lambda x: x[0], reverse=True):
-        print('level', level, 'amount', lev_amount)
-        allowed = list(_d_filter_level(free, lambda x: x > level))
-        allowed_range = sum(map(lambda x: x[1], allowed))
-        # first, move items
-        if allowed_range > 0.:
-            amount = min(lev_amount, allowed_range)
-            k = amount / allowed_range  # part of item to move down
-            for key, value in allowed:
-                intersect = value * k
-                _d_add(base, key, intersect)
-                _d_add(add, key, -intersect)
-                _d_add(free, key, -intersect)
-                _d_add(next_levels, key[1], intersect)
+    # require and move levels
+    # cut levels
+    rest = {}
+    for level in range(size - 1, -1, -1):
+
+        #### prepare
+
+        rest = _d_merge(rest, dict(_d_filter_level(add, lambda x: x == level + 1)))
+        rest_range = sum(map(lambda x: x[1], rest.items()))
+        base_items = dict(_d_filter_level(base, lambda x: x == level))
+        base_range = sum(map(lambda x: x[1], base_items.items()))
+        lev_amount = _d_get(levels, level)
+
+        #### require by existent base cells
+
+        if base_range > rest_range + rest_zero + epsilon:
+            print(base_range, '>', rest_range, '+', rest_zero)
+            raise InvalidPyramidException
+        # first, annihilate items
+        if rest_range > 0.:
+            amount = min(rest_range, base_range)
+            k = amount / rest_range  # part of item to annihilate
+            rest = _d_mult(rest, 1. - k)  # cut required part
         # second, fill the rest of the gap with zero level
-        amount = max(0., lev_amount - allowed_range)
-        if amount > allowed_zero:
+        amount = max(0., base_range - rest_range)
+        if amount > rest_zero + epsilon:
+            print(amount, '>', rest_zero)
+            raise InvalidPyramidException
+        rest_zero -= amount  # cut required part
+        rest_range = sum(map(lambda x: x[1], rest.items()))  # update current state
+
+        #### move items down
+
+        # first, move items
+        if rest_range > 0.:
+            amount = min(lev_amount, rest_range)
+            k = amount / rest_range  # part of item to move down
+            move = _d_merge(move, _d_mult(rest, k))
+            rest = _d_mult(rest, 1. - k)  # cut moved part
+        # second, fill the rest of the gap with zero level
+        amount = max(0., lev_amount - rest_range)
+        if amount > rest_zero + epsilon:
+            print(amount, '>', rest_zero)
             raise InvalidShiftLevelAmountException
-        _d_add(base, 0, amount)
-        _d_add(add, 0, -amount)
-        allowed_zero -= amount
-        _d_add(next_levels, None, amount)
+        _d_add(move, 0, amount)
+        rest_zero -= amount  # cut moved part
+
+    # apply moves
+    next_levels = {}
+    for k, v in move.items():
+        _d_add(base, k, v)
+        _d_add(add, k, -v)
+        _d_add(next_levels, None if k == 0 else k[1], v)
 
     return next_levels
 
 
 def shift_prob_line2(row, toidx, levels):
-    print(color('Shift levels {}'.format(levels), color.GREEN))
     sm = sum(levels.values())
     for target_idx in range(toidx, size - 1, 1):
         next_levels = {}
         src = row[target_idx + 1]
         target = row[target_idx]
-        print(color('    {}'.format(levels), color.GREEN), '{} <- {}'.format(target, src))
 
-        levels = shift_empty_space(target, src, levels)
-        assert abs(sm - sum(levels.values())) < epsilon
+        next_levels = shift_empty_space(target, src, levels)
+        if abs(sm - sum(next_levels.values())) > epsilon:
+            raise Exception('Bad level values: was {} become {}'.format(levels, next_levels))
+        levels = next_levels
     _d_add(row[size - 1], 0, sm)
 
 
 def put_random_prob(s):
     emptycount = sum((v[0] if 0 in v else 0.) for v in s)
+    #print('emptycount', emptycount)
     if emptycount == 0:
         return False
     for v in s:
         if 0 not in v:
             continue
-        inter2 = (1 - prob_4) * v[0] / emptycount
-        inter4 = prob_4 * v[0] / emptycount
+        inter2 = (1 - prob_4) * v[0] * (v[0] / emptycount)
+        inter4 = prob_4 * v[0] * (v[0] / emptycount)
         _d_add(v, 2, inter2)
         _d_add(v, 4, inter4)
         _d_add(v, 0, -(inter2 + inter4))
@@ -451,8 +486,15 @@ def make_prob_state(s):
 def move_tree(state, backtrack):
     if backtrack <= 0:
         return sum(_d_getzero(v) for v in state)  # best is most empty
+    old_state = state
     state = deepcopy(state)
     put_random_prob(state)
+    for d in state:
+        bads = list(filter(lambda x: not(-epsilon < x < 1. + epsilon), d.values()))
+        if bads:
+            print(old_state)
+            print(state)
+            raise Exception('Bad put random')
     x = []
     for direct in range(4):
         s = deepcopy(state)
