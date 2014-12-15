@@ -2,7 +2,7 @@ import random
 
 
 size = 4
-prob_4 = 1/3  # TODO: not actually proper, original game have 10%
+prob_4 = 0.1  # https://ru.wikipedia.org/wiki/2048_%28%D0%B8%D0%B3%D1%80%D0%B0%29
 
 
 def get_val(s, x, y):
@@ -94,12 +94,8 @@ def put_random(s):
     raise Exception('Random cell not found')
 
 
-def main():
-    from newai import choose_move
+def game(choose_move):
     from numprint import print_state
-
-    #from os.path import getmtime
-    #vers = getmtime('game.py')
 
     s = [0] * size * size
     for i in range(3):
@@ -112,7 +108,7 @@ def main():
     while not is_final(s):
         direct = choose_move(s)
         if direct is None:
-            print('AI can\'t find the move')
+            print('Decided to exit')
             break
 
         move(s, direct)
@@ -125,9 +121,38 @@ def main():
     print('GAME OVER')
     print('Maximum is {}'.format(max(s)))
 
-    #with open('top.txt', 'a') as f:
-        #f.write('{}: {}\n'.format(vers, max(s)))
+    return max(s)
 
 
 if __name__ == '__main__':
-    main()
+    from getch import getch
+    from time import monotonic
+
+    print('Press ESC twice to quit')
+
+    keymap = {
+        (27, 91, 65): 0,
+        (27, 91, 67): 1,
+        (27, 91, 66): 2,
+        (27, 91, 68): 3,
+        (27, 27): None,
+    }
+
+    def human_move(s):
+        stack = []
+        stacktime = monotonic()
+        while True:
+            ch = ord(getch())
+            dt = monotonic() - stacktime
+            if dt > 0.5:
+                stack = []
+            stacktime += dt
+            stack.append(ch)
+            #print('Pressed', ch, 'stack is', stack, 'dt', dt)
+            if tuple(stack) in keymap:
+                return keymap[tuple(stack)]
+            if ch == 3:  # ctrl+c
+                return None
+
+
+    game(human_move)

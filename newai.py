@@ -158,6 +158,7 @@ def merge_cells(base, add):
 
 def validate_pyramid_cells(base, add):
     vlog = []
+
     def check(base_range, add_range, level):
         vlog.append('{} <= {} at level {} (rest={})'.format(base_range, add_range, level, add_range - base_range))
         if base_range - add_range > epsilon:
@@ -257,7 +258,6 @@ def brute_force_row(row, count=1000):
 
 
 def merge_prob_line(row):
-    #print(row)
     validate_pyramid_line(row)
     for cur_idx in range(len(row) - 1):
         nxt_idx = cur_idx + 1
